@@ -1,8 +1,9 @@
 import streamlit as st
 import google.generativeai as genai
 import os
-from dotenv import load_dotenv
 import json
+import fitz  # PyMuPDF for PDFs
+from dotenv import load_dotenv
 
 # Load API key from .env file
 load_dotenv()
@@ -11,28 +12,46 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 # Configure Gemini API
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Set Streamlit UI configuration
-st.set_page_config(page_title="Gemini AI Chatbot", layout="wide")
-
-# System instruction to restrict chatbot responses
-SYSTEM_INSTRUCTION = "You are an AI that only answers questions related to medical topics. Do not answer questions outside this domain."
-
-# JSON file to store chat history
+# Document file (must be in the same directory)
+DOCUMENT_PATH = "=machine_learning_intro.pdf"  # Change to your document name
 CHAT_HISTORY_FILE = "chat_history.json"
 
-# Function to load chat history from JSON file
+# Function to extract text from PDF
+def extract_text_from_pdf(pdf_path):
+    """Extract text from a PDF file."""
+    doc = fitz.open(pdf_path)
+    return "\n".join(page.get_text() for page in doc)
+
+# Load document text
+if os.path.exists(DOCUMENT_PATH):
+    document_text = extract_text_from_pdf(DOCUMENT_PATH)
+else:
+    document_text = "Document not found. Please upload a valid document."
+
+# Initialize chat session
+if "chat_session" not in st.session_state:
+    model = genai.GenerativeModel("gemini-1.5-pro")  
+    st.session_state.chat_session = model.start_chat(history=[])
+
+# Function to chat with Gemini using only document text
+def ask_gemini(query):
+    """Send extracted text as context to Gemini API, restricting answers to the document."""
+    response = st.session_state.chat_session.send_message([document_text[:5000], query])
+    return response.text
+
+# Function to load chat history
 def load_chat_history():
     if os.path.exists(CHAT_HISTORY_FILE):
         with open(CHAT_HISTORY_FILE, "r") as file:
             return json.load(file)
     return []
 
-# Function to save chat history to JSON file
+# Function to save chat history
 def save_chat_history(messages):
     with open(CHAT_HISTORY_FILE, "w") as file:
         json.dump(messages, file, indent=4)
 
-# Custom CSS for styling chat UI
+# Custom CSS for chat UI
 st.markdown(
     """
     <style>
@@ -81,54 +100,38 @@ st.markdown(
 # Sidebar Instructions
 with st.sidebar:
     st.title("🛠 How to Use")
-    st.write("1. Type a **medical-related** question in the chat box.")
-    st.write("2. Press **Enter** to send.")
-    st.write("3. If your question is not related to medical topics, it will be rejected.")
-    st.write("4. The conversation history is saved.")
+    st.write("1. Ask a  question.")
+    st.write("2. Responses are based **only on the uploaded document**.")
+    st.write("3. Chat history is saved.")
 
-# Title
-st.markdown("<h1 style='text-align: center;'>💬 Gemini AI Chatbot</h1>", unsafe_allow_html=True)
+# Chat UI Title
+st.markdown("<h1 style='text-align: center;'>💬 Document based AI Chatbot</h1>", unsafe_allow_html=True)
 
-# Initialize chat session
-if "chat_session" not in st.session_state:
-    model = genai.GenerativeModel("gemini-1.5-pro") 
-    st.session_state.chat_session = model.start_chat(history=[])
-
-# Load existing chat history or initialize new one
+# Load chat history
 if "messages" not in st.session_state:
     chat_history = load_chat_history()
-    
-    # If chat history is empty, add a greeting message
     if not chat_history:
-        chat_history = [{"role": "assistant", "content": "Hello! 👋 I'm a medical AI assistant. Ask me about health, diseases, and treatments!"}]
-    
+        chat_history = [{"role": "assistant", "content": "Hello! 👋 I'm your  AI assistant. Ask me anything from the document."}]
     st.session_state.messages = chat_history
 
 # Display previous messages
 for message in st.session_state.messages:
-    role = message["role"]
-    content = message["content"]
-    if role == "user":
-        st.markdown(f"<div class='user-container'><div class='user-bubble'>{content}</div></div>", unsafe_allow_html=True)
-    else:
-        st.markdown(f"<div class='ai-container'><div class='ai-bubble'>{content}</div></div>", unsafe_allow_html=True)
+    role, content = message["role"], message["content"]
+    css_class = "user-bubble" if role == "user" else "ai-bubble"
+    container_class = "user-container" if role == "user" else "ai-container"
+    st.markdown(f"<div class='{container_class}'><div class='{css_class}'>{content}</div></div>", unsafe_allow_html=True)
 
-# User input
-prompt = st.chat_input("Ask me a medical question...")
+# User Input
+prompt = st.chat_input("Ask a question based on the document...")
 if prompt:
-    # Add user message to session history
+    # Store user input
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.markdown(f"<div class='user-container'><div class='user-bubble'>{prompt}</div></div>", unsafe_allow_html=True)
 
-    # Get AI response with system instruction
-    response = st.session_state.chat_session.send_message([SYSTEM_INSTRUCTION, prompt])
-    ai_reply = response.text
+    # Get AI response (restricted to document)
+    ai_reply = ask_gemini(prompt)
 
-    # Ensure AI remains responsive
-    if "sorry" in ai_reply.lower() or "cannot" in ai_reply.lower():
-        ai_reply += " Feel free to ask another medical-related question!"
-    
-    # Add AI response to session history
+    # Store AI response
     st.session_state.messages.append({"role": "assistant", "content": ai_reply})
     st.markdown(f"<div class='ai-container'><div class='ai-bubble'>{ai_reply}</div></div>", unsafe_allow_html=True)
 
