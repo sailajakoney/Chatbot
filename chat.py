@@ -6,7 +6,10 @@ import json
 
 # Load API key from .env file
 load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# Load API key from Streamlit Secrets
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 
 # Configure Gemini API
 genai.configure(api_key=GEMINI_API_KEY)
